@@ -1,9 +1,5 @@
 package com.example.ai_task_android
 
-
-import androidx.compose.runtime.*
-import com.example.ai_task_android.model.UiTask
-import com.example.ai_task_android.storage.TaskJsonlStorage
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -22,46 +18,107 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.example.ai_task_android.model.UiTask
+import com.example.ai_task_android.storage.TaskJsonlStorage
+import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import com.example.ai_task_android.api.FakeScoreClient
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
+
+
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
         setContent {
+            val scope = rememberCoroutineScope()
+
             TaskCoreNeonTheme {
+
+                // ① State：jsonlから読み込み
+                var tasks by remember { mutableStateOf(TaskJsonlStorage.load(this@MainActivity)) }
+
+                // ② スコアラー（今はFake）
+                val scorer = remember { FakeScoreClient() }
+
+                // ③ コルーチンスコープ（ボタンから呼ぶ用）
+                val scope = rememberCoroutineScope()
+
+                // ④ スコア更新処理（suspendでもOKだけど、呼び出し側でlaunchする）
+                suspend fun refreshScores() {
+                    val scoreMap = scorer.scoreTasks(tasks)
+
+                    val updated = tasks.map { t ->
+                        val newScore = scoreMap[t.id]
+                        if (newScore != null && newScore != t.score) t.copy(score = newScore) else t
+                    }
+
+                    tasks = updated
+                    TaskJsonlStorage.save(this@MainActivity, tasks)
+                }
+
                 Surface(modifier = Modifier.fillMaxSize(), color = Neon.Bg) {
-                    TaskScreen()
+                    TaskScreen(
+                        tasks = tasks,                          // ← ここ重要：UIはStateの写像
+                        onToggleDone = { id ->
+                            tasks = tasks.map { t ->
+                                if (t.id == id) t.copy(status = if (t.status == "done") "todo" else "done") else t
+                            }
+                            TaskJsonlStorage.save(this@MainActivity, tasks)
+                        },
+                        onRefreshScores = {
+                            scope.launch { refreshScores() }     // ← ボタンから呼ぶ
+                        }
+                    )
                 }
             }
         }
+
     }
 }
 
-/* -----------------------------
- *  仮データ（Room前のMVP）
- * ----------------------------- */
-data class UiTask(
-    val dbId: Long,
-    val title: String,
-    val project: String,
-    val dueText: String?,
-    val score: Int,
-    val status: String
-)
-
-
 @Composable
-fun TaskScreen() {
-    // 仮のタスク一覧（あとでRoom+ViewModelに差し替える）
-    val tasks = remember {
-        mutableStateListOf(
-            UiTask(4, "Pythonのタスク管理ツールのタグ機能を試す", "default", null, 15, "todo"),
-            UiTask(11, "テストタスク", "default", null, 15, "todo"),
-            UiTask(1, "Pythonのタスク管理ツールを試す", "default", null, 0, "todo"),
-            UiTask(2, "今日やったことを纏める", "default", null, 0, "todo"),
-            UiTask(3, "doneの拡張", "default", null, 0, "todo"),
-            UiTask(5, "ゲーム業界への質問を考える", "default", null, 0, "todo"),
-            UiTask(9, "ベースの飾り方のレイアウト案を3パターン書き出す", "room", "2025-12-03（締切から9日経過）", 0, "todo"),
-        )
+fun TaskScreen(
+    tasks: List<UiTask>,
+    onToggleDone: (Long) -> Unit,
+    onRefreshScores: () -> Unit
+) {
+    OutlinedButton(
+        onClick = { scope.launch { refreshScores() } }
+
+    }) { Text("優先度更新") }
+
+
+    // Load tasks from jsonl on initial composition
+    var tasks by remember {
+        mutableStateOf(TaskJsonlStorage.load(context))
+    }
+
+
+    // Calculate recommended tasks (top 3 incomplete tasks sorted by score)
+    val recommendedTasks = remember(tasks) {
+        tasks
+            .filter { it.status != "done" }
+            .sortedByDescending { it.score }
+            .take(3)
+    }
+
+    // Handler for task completion
+    val onDoneClick: (Long) -> Unit = { taskId ->
+        // Update task status
+        tasks = tasks.map { task ->
+            if (task.id == taskId) {
+                task.copy(status = if (task.status == "todo") "done" else "todo")
+            } else {
+                task
+            }
+        }.toMutableList()
+
+        // Save to jsonl
+        TaskJsonlStorage.save(context, tasks)
     }
 
     Box(
@@ -74,22 +131,16 @@ fun TaskScreen() {
             modifier = Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // ① 一番上：おすすめタスク
+            // Top: Recommended tasks
             TaskListCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f),
-                tasks = tasks,
-                onDoneClick = { id ->
-                    val idx = tasks.indexOfFirst { it.dbId == id }
-                    if (idx >= 0) {
-                        val t = tasks[idx]
-                        tasks[idx] = t.copy(status = if (t.status == "todo") "done" else "todo")
-                    }
-                }
+                tasks = recommendedTasks,
+                onDoneClick = onDoneClick
             )
 
-            // ② 下：千紗の一言（コメント）
+            // Bottom: Footer message
             FooterMessage(
                 text = "今日も一緒に頑張ろう！",
                 modifier = Modifier.fillMaxWidth()
@@ -99,60 +150,7 @@ fun TaskScreen() {
 }
 
 @Composable
-fun ChisaCard(
-    modifier: Modifier = Modifier,
-    title: String,
-    subtitle: String,
-    message: String
-) {
-    Card(
-        modifier = modifier.heightIn(min = 220.dp),
-        shape = RoundedCornerShape(22.dp),
-        border = BorderStroke(1.dp, Neon.Border),
-        colors = CardDefaults.cardColors(containerColor = Neon.Panel)
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(160.dp)
-                    .background(
-                        brush = Brush.linearGradient(listOf(Neon.Pink, Neon.Purple, Neon.Cyan)),
-                        shape = RoundedCornerShape(22.dp)
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = title,
-                    color = Color.White,
-                    fontWeight = FontWeight.Black,
-                    style = MaterialTheme.typography.headlineLarge
-                )
-            }
-
-            Text(
-                text = subtitle,
-                color = Neon.TextDim,
-                style = MaterialTheme.typography.labelLarge
-            )
-
-            Text(
-                text = message,
-                color = Neon.Text,
-                style = MaterialTheme.typography.bodyLarge
-            )
-        }
-    }
-}
-
-@Composable
 fun TaskListCard(
-
     modifier: Modifier = Modifier,
     tasks: List<UiTask>,
     onDoneClick: (Long) -> Unit
@@ -164,7 +162,6 @@ fun TaskListCard(
         colors = CardDefaults.cardColors(containerColor = Neon.Panel)
     ) {
         Column(modifier = Modifier.fillMaxSize().padding(14.dp)) {
-            val topTasks = remember(tasks) { tasks.take(3) }
             Text(
                 text = "今日のおすすめ",
                 color = Neon.Text,
@@ -173,14 +170,26 @@ fun TaskListCard(
             )
             Spacer(Modifier.height(10.dp))
 
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                items(topTasks, key = { it.dbId}) { task ->
-                    TaskRow(task = task, onDoneClick = { onDoneClick(task.dbId) })
+            if (tasks.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "すべてのタスクが完了しました！",
+                        color = Neon.TextDim,
+                        style = MaterialTheme.typography.bodyLarge
+                    )
                 }
-
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    items(tasks, key = { it.id }) { task ->
+                        TaskRow(task = task, onDoneClick = onDoneClick)
+                    }
+                }
             }
         }
     }
@@ -207,7 +216,7 @@ fun TaskRow(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = task.dbId.toString(),
+                text = task.id.toString(),
                 color = Neon.TextDim,
                 style = MaterialTheme.typography.labelLarge,
                 modifier = Modifier.width(28.dp)
@@ -226,14 +235,12 @@ fun TaskRow(
                 Spacer(Modifier.height(4.dp))
 
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Pill(text = task.project)
                     Pill(text = "score ${task.score}")
-                    task.dueText?.let { Pill(text = it) }
                 }
             }
 
             OutlinedButton(
-                onClick = { onDoneClick(task.dbId) },
+                onClick = { onDoneClick(task.id) },
                 shape = RoundedCornerShape(14.dp),
                 border = BorderStroke(1.dp, Neon.Border),
                 colors = ButtonDefaults.outlinedButtonColors(
@@ -244,7 +251,6 @@ fun TaskRow(
             ) {
                 Text(text = if (isDone) "戻す" else "完了")
             }
-
         }
     }
 }
@@ -296,7 +302,7 @@ fun FooterMessage(text: String, modifier: Modifier = Modifier) {
 }
 
 /* -----------------------------
- *  テーマ（最小）
+ *  Theme
  * ----------------------------- */
 private object Neon {
     val Bg = Color(0xFF12041F)
@@ -313,7 +319,7 @@ private object Neon {
     val Text = Color(0xFFF5E9FF)
     val TextDim = Color(0xFFC7A9E6)
 
-    val PillBg = Color(0x2216A5FF) // ほんのり青紫
+    val PillBg = Color(0x2216A5FF)
 }
 
 @Composable

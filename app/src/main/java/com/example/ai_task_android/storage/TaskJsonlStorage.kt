@@ -4,6 +4,8 @@ import android.content.Context
 import com.example.ai_task_android.model.UiTask
 import org.json.JSONObject
 import java.io.File
+import org.json.JSONArray
+
 
 object TaskJsonlStorage {
 
@@ -11,17 +13,30 @@ object TaskJsonlStorage {
 
     fun load(context: Context): MutableList<UiTask> {
         val file = File(context.filesDir, FILE_NAME)
-        if (!file.exists()) return mutableListOf()
+
+        // If file doesn't exist, create it with seed data
+        if (!file.exists()) {
+            val seedTasks = createSeedData()
+            save(context, seedTasks)
+            return seedTasks.toMutableList()
+        }
 
         return file.readLines()
             .filter { it.isNotBlank() }
             .map { line ->
                 val json = JSONObject(line)
+
+                val tagsArray = json.optJSONArray("tags") ?: JSONArray()
+                val tags = (0 until tagsArray.length()).map { i -> tagsArray.getString(i) }
+
                 UiTask(
                     id = json.getLong("id"),
                     title = json.getString("title"),
-                    status = json.getString("status"),
-                    score = json.getInt("score")
+                    status = json.optString("status", "todo"),
+                    score = json.optInt("score", 0),
+                    project = json.optString("project", "default"),
+                    dueDate = json.optString("dueDate", "").takeIf { it.isNotBlank() },
+                    tags = tags
                 )
             }
             .toMutableList()
@@ -36,9 +51,25 @@ object TaskJsonlStorage {
                     put("title", task.title)
                     put("status", task.status)
                     put("score", task.score)
+                    put("project", task.project)
+                    put("dueDate", task.dueDate)
+                    put("tags", JSONArray(task.tags))
+
                 }
                 out.println(json.toString())
             }
         }
+    }
+
+    private fun createSeedData(): List<UiTask> {
+        return listOf(
+            UiTask(1L, "Pythonのタスク管理ツールを試す", "todo", 0),
+            UiTask(2L, "今日やったことを纏める", "todo", 0),
+            UiTask(3L, "doneの拡張", "todo", 0),
+            UiTask(4L, "Pythonのタスク管理ツールのタグ機能を試す", "todo", 15),
+            UiTask(5L, "ゲーム業界への質問を考える", "todo", 0),
+            UiTask(9L, "ベースの飾り方のレイアウト案を3パターン書き出す", "todo", 5),
+            UiTask(11L, "テストタスク", "todo", 15)
+        )
     }
 }
