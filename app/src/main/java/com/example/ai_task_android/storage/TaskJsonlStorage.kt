@@ -4,8 +4,6 @@ import android.content.Context
 import com.example.ai_task_android.model.UiTask
 import org.json.JSONObject
 import java.io.File
-import org.json.JSONArray
-
 
 object TaskJsonlStorage {
 
@@ -25,18 +23,11 @@ object TaskJsonlStorage {
             .filter { it.isNotBlank() }
             .map { line ->
                 val json = JSONObject(line)
-
-                val tagsArray = json.optJSONArray("tags") ?: JSONArray()
-                val tags = (0 until tagsArray.length()).map { i -> tagsArray.getString(i) }
-
                 UiTask(
                     id = json.getLong("id"),
                     title = json.getString("title"),
-                    status = json.optString("status", "todo"),
-                    score = json.optInt("score", 0),
-                    project = json.optString("project", "default"),
-                    dueDate = json.optString("dueDate", "").takeIf { it.isNotBlank() },
-                    tags = tags
+                    status = json.getString("status"),
+                    score = json.getInt("score")
                 )
             }
             .toMutableList()
@@ -51,10 +42,6 @@ object TaskJsonlStorage {
                     put("title", task.title)
                     put("status", task.status)
                     put("score", task.score)
-                    put("project", task.project)
-                    put("dueDate", task.dueDate)
-                    put("tags", JSONArray(task.tags))
-
                 }
                 out.println(json.toString())
             }
