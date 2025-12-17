@@ -22,13 +22,22 @@ import com.example.ai_task_android.api.FakeScoreClient
 import com.example.ai_task_android.model.UiTask
 import com.example.ai_task_android.storage.TaskJsonlStorage
 import kotlinx.coroutines.launch
+import androidx.compose.runtime.LaunchedEffect
+import com.example.ai_task_android.api.TaskSyncClient
+
 
 class MainActivity : ComponentActivity() {
+
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         setContent {
             TaskCoreNeonTheme {
+                LaunchedEffect(Unit) {
+                    TaskSyncClient("http://10.0.2.2:5000").fetchTasks()
+                }
+
                 // ① State: jsonlから読み込み（Single Source of Truth）
                 var tasks: List<UiTask> by remember {
                     mutableStateOf(TaskJsonlStorage.load(this@MainActivity))
@@ -87,6 +96,9 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+
+
+
     }
 }
 
@@ -273,6 +285,7 @@ fun Pill(text: String) {
     }
 }
 
+
 @Composable
 fun FooterMessage(text: String, modifier: Modifier = Modifier) {
     Card(
@@ -337,3 +350,5 @@ fun TaskCoreNeonTheme(content: @Composable () -> Unit) {
         content = content
     )
 }
+
+
