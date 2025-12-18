@@ -44,9 +44,11 @@ android {
 
 dependencies {
     val roomVersion = "2.6.1"
+    implementation("com.google.code.gson:gson:2.10.1")
     implementation("androidx.room:room-runtime:$roomVersion")
     implementation("androidx.room:room-ktx:$roomVersion")
     kapt("androidx.room:room-compiler:$roomVersion")
+    implementation("com.google.code.gson:gson:2.10.1")
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)

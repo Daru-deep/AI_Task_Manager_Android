@@ -24,6 +24,11 @@ import com.example.ai_task_android.storage.TaskJsonlStorage
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.LaunchedEffect
 import com.example.ai_task_android.api.TaskSyncClient
+import com.example.ai_task_android.api.TasksResponse
+import com.google.gson.Gson
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+
 
 
 class MainActivity : ComponentActivity() {
@@ -35,12 +40,38 @@ class MainActivity : ComponentActivity() {
         setContent {
             TaskCoreNeonTheme {
                 LaunchedEffect(Unit) {
-                    TaskSyncClient("http://10.0.2.2:5000").fetchTasks()
+                    val json = TaskSyncClient("http://10.0.2.2:5000").fetchTasksJson()
+                    val resp = Gson().fromJson(json, TasksResponse::class.java)
+                    tasks = resp.tasks.map { dto ->
+                        UiTask(
+                            id = dto.id,
+                            title = dto.text,
+                            status = dto.status,
+                            score = 0
+                        )
+                    }
                 }
+
+
 
                 // ① State: jsonlから読み込み（Single Source of Truth）
                 var tasks: List<UiTask> by remember {
                     mutableStateOf(TaskJsonlStorage.load(this@MainActivity))
+                }
+                LaunchedEffect(Unit) {
+                    val json = TaskSyncClient("http://10.0.2.2:5000").fetchTasksJson()
+                    val resp = Gson().fromJson(json, TasksResponse::class.java)
+
+                    tasks = resp.tasks.map { dto ->
+                        UiTask(
+                            id = dto.id.toLong(),
+                            title = dto.text,
+                            status = dto.status,
+                            score = 0,
+                            project = dto.project ?: "default",
+                            tags = dto.tags ?: emptyList()
+                        )
+                    }
                 }
 
 
