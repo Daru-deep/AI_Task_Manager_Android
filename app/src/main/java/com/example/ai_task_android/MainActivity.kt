@@ -19,102 +19,82 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.ai_task_android.api.FakeScoreClient
-import com.example.ai_task_android.model.UiTask
-import com.example.ai_task_android.storage.TaskJsonlStorage
-import kotlinx.coroutines.launch
-import androidx.compose.runtime.LaunchedEffect
 import com.example.ai_task_android.api.TaskSyncClient
 import com.example.ai_task_android.api.TasksResponse
+import com.example.ai_task_android.model.UiTask
+import com.example.ai_task_android.storage.TaskJsonlStorage
 import com.google.gson.Gson
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
+import android.util.Log
+import androidx.compose.foundation.clickable
 
 
+private const val BASE_URL = "http://10.0.2.2:5000"
 
 class MainActivity : ComponentActivity() {
-
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
+        
         setContent {
             TaskCoreNeonTheme {
-                LaunchedEffect(Unit) {
-                    val json = TaskSyncClient("http://10.0.2.2:5000").fetchTasksJson()
-                    val resp = Gson().fromJson(json, TasksResponse::class.java)
-                    tasks = resp.tasks.map { dto ->
-                        UiTask(
-                            id = dto.id,
-                            title = dto.text,
-                            status = dto.status,
-                            score = 0
-                        )
-                    }
-                }
-
-
-
-                // ① State: jsonlから読み込み（Single Source of Truth）
-                var tasks: List<UiTask> by remember {
+                // ① State: Single Source of Truth
+                var tasks by remember { 
                     mutableStateOf(TaskJsonlStorage.load(this@MainActivity))
                 }
-                LaunchedEffect(Unit) {
-                    val json = TaskSyncClient("http://10.0.2.2:5000").fetchTasksJson()
-                    val resp = Gson().fromJson(json, TasksResponse::class.java)
+                var selectedTask by remember { mutableStateOf<UiTask?>(null) }
 
-                    tasks = resp.tasks.map { dto ->
-                        UiTask(
-                            id = dto.id.toLong(),
-                            title = dto.text,
-                            status = dto.status,
-                            score = 0,
-                            project = dto.project ?: "default",
-                            tags = dto.tags ?: emptyList()
-                        )
+
+                // ② サーバーからタスクを取得
+                LaunchedEffect(Unit) {
+                    try {
+                        val json = TaskSyncClient(BASE_URL).fetchTasksJson()
+                        Log.d("TaskSync", "fromServer json head=" + json.take(200))
+                        val resp = Gson().fromJson(json, TasksResponse::class.java)
+                        Log.d("TaskSync", "fromServer tasks count=" + resp.tasks.size)
+
+                        tasks = resp.tasks.map { dto ->
+                            UiTask(
+                                id = dto.id.toLong(),
+                                title = dto.text,
+                                status = dto.status,
+                                score = 0,
+                                project = dto.project ?: "default",
+                                tags = dto.tags ?: emptyList()
+                            )
+                        }
+                    } catch (e: Exception) {
+                        // エラー時はローカルのデータを使う
+                        println("サーバー取得失敗: ${e.message}")
                     }
                 }
-
-
-                // ② スコアラー（今はFake、将来OpenAI）
+                
+                // ③ スコアラー（Fake）
                 val scorer = remember { FakeScoreClient() }
-
-                // ③ コルーチンスコープ（ボタンから呼ぶ用）
+                
+                // ④ コルーチンスコープ
                 val scope = rememberCoroutineScope()
-
-                // ④ スコア更新処理
+                
+                // ⑤ スコア更新処理
                 val refreshScores: () -> Unit = {
                     scope.launch {
-                        // スコア計算（非同期）
                         val scoreMap = scorer.scoreTasks(tasks)
-
-                        // tasksを更新
                         tasks = tasks.map { task ->
                             val newScore = scoreMap[task.id]
-                            if (newScore != null && newScore != task.score) {
-                                task.copy(score = newScore)
-                            } else {
-                                task
-                            }
+                            if (newScore != null) task.copy(score = newScore) else task
                         }
-
-                        // jsonlに保存
                         TaskJsonlStorage.save(this@MainActivity, tasks)
                     }
                 }
-
-                // ⑤ 完了/戻す処理
+                
+                // ⑥ 完了/戻す処理
                 val onToggleDone: (Long) -> Unit = { taskId ->
                     tasks = tasks.map { task ->
                         if (task.id == taskId) {
-                            task.copy(
-                                status = if (task.status == "todo") "done" else "todo"
-                            )
+                            task.copy(status = if (task.status == "todo") "done" else "todo")
                         } else {
                             task
                         }
                     }
-
-                    // jsonlに保存
                     TaskJsonlStorage.save(this@MainActivity, tasks)
                 }
 
@@ -122,14 +102,25 @@ class MainActivity : ComponentActivity() {
                     TaskScreen(
                         tasks = tasks,
                         onToggleDone = onToggleDone,
-                        onRefreshScores = refreshScores
+                        onRefreshScores = refreshScores,
+                        onTaskClick = { selectedTask = it }
+                    )
+
+                }
+
+                selectedTask?.let { task ->
+                    AlertDialog(
+                        onDismissRequest = { selectedTask = null },
+                        confirmButton = {
+                            TextButton(onClick = { selectedTask = null }) { Text("閉じる") }
+                        },
+                        title = { Text("タスク詳細") },
+                        text = { Text(task.title) }
                     )
                 }
+
             }
         }
-
-
-
     }
 }
 
@@ -137,8 +128,10 @@ class MainActivity : ComponentActivity() {
 fun TaskScreen(
     tasks: List<UiTask>,
     onToggleDone: (Long) -> Unit,
-    onRefreshScores: () -> Unit
+    onRefreshScores: () -> Unit,
+    onTaskClick: (UiTask) -> Unit
 ) {
+
     // おすすめタスクを算出（未完了・スコア順・最大3件）
     val recommendedTasks = remember(tasks) {
         tasks
@@ -170,15 +163,17 @@ fun TaskScreen(
             ) {
                 Text("優先度更新", style = MaterialTheme.typography.bodyLarge)
             }
-
+            
             // おすすめタスク
             TaskListCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f),
                 tasks = recommendedTasks,
-                onDoneClick = onToggleDone
+                onDoneClick = onToggleDone,
+                onTaskClick = onTaskClick
             )
+
 
             // フッターメッセージ
             FooterMessage(
@@ -193,8 +188,10 @@ fun TaskScreen(
 fun TaskListCard(
     modifier: Modifier = Modifier,
     tasks: List<UiTask>,
-    onDoneClick: (Long) -> Unit
-) {
+    onDoneClick: (Long) -> Unit,
+    onTaskClick: (UiTask) -> Unit
+)
+ {
     Card(
         modifier = modifier.heightIn(min = 220.dp),
         shape = RoundedCornerShape(22.dp),
@@ -222,14 +219,24 @@ fun TaskListCard(
                     )
                 }
             } else {
+                Text("DEBUG tasks size = ${tasks.size}")
+
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     items(tasks, key = { it.id }) { task ->
-                        TaskRow(task = task, onDoneClick = onDoneClick)
+                        TaskRow(
+                            task = task,
+                            onDoneClick = onDoneClick,
+                            onClick = { onTaskClick(task) }
+                        )
+
+
+
                     }
                 }
+
             }
         }
     }
@@ -238,16 +245,20 @@ fun TaskListCard(
 @Composable
 fun TaskRow(
     task: UiTask,
-    onDoneClick: (Long) -> Unit
+    onDoneClick: (Long) -> Unit,
+    onClick: () -> Unit
 ) {
+
     val isDone = task.status == "done"
     val rowBorder = if (isDone) Neon.BorderDim else Neon.Border
 
     Card(
+        modifier = Modifier.clickable { onClick() },
         shape = RoundedCornerShape(18.dp),
         border = BorderStroke(1.dp, rowBorder),
         colors = CardDefaults.cardColors(containerColor = Neon.RowBg)
     ) {
+
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -276,7 +287,7 @@ fun TaskRow(
 
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Pill(text = "score ${task.score}")
-
+                    
                     // タグがあれば表示
                     task.tags.forEach { tag ->
                         Pill(text = tag)
@@ -315,7 +326,6 @@ fun Pill(text: String) {
         )
     }
 }
-
 
 @Composable
 fun FooterMessage(text: String, modifier: Modifier = Modifier) {
@@ -381,5 +391,3 @@ fun TaskCoreNeonTheme(content: @Composable () -> Unit) {
         content = content
     )
 }
-
-
