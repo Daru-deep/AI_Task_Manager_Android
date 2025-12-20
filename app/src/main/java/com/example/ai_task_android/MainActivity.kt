@@ -27,7 +27,10 @@ import com.google.gson.Gson
 import kotlinx.coroutines.launch
 import android.util.Log
 import androidx.compose.foundation.clickable
+import com.example.ai_task_android.screen.DiaryScreen
 
+
+enum class Screen { Tasks, Diary }
 
 private const val BASE_URL = "http://10.0.2.2:5000"
 
@@ -36,6 +39,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         
         setContent {
+
+
             TaskCoreNeonTheme {
                 // ① State: Single Source of Truth
                 var tasks by remember { 
@@ -98,15 +103,42 @@ class MainActivity : ComponentActivity() {
                     TaskJsonlStorage.save(this@MainActivity, tasks)
                 }
 
-                Surface(modifier = Modifier.fillMaxSize(), color = Neon.Bg) {
-                    TaskScreen(
-                        tasks = tasks,
-                        onToggleDone = onToggleDone,
-                        onRefreshScores = refreshScores,
-                        onTaskClick = { selectedTask = it }
-                    )
+                var current by remember { mutableStateOf(Screen.Tasks) }
 
+                Surface(modifier = Modifier.fillMaxSize(), color = Neon.Bg) {
+                    Column(Modifier.fillMaxSize()) {
+
+                        // 上：画面本体
+                        Box(Modifier.weight(1f)) {
+                            when (current) {
+                                Screen.Tasks -> {
+                                    TaskScreen(
+                                        tasks = tasks,
+                                        onToggleDone = onToggleDone,
+                                        onRefreshScores = refreshScores,
+                                        onTaskClick = { selectedTask = it }
+                                    )
+                                }
+                                Screen.Diary -> {
+                                    DiaryScreen(
+                                        baseUrl = BASE_URL,
+                                        onPosted = {
+                                            // 投稿できたらタスク画面に戻す、くらいでOK
+                                            current = Screen.Tasks
+                                        }
+                                    )
+                                }
+                            }
+                        }
+
+                        // 下：タブ
+                        BottomTabs(
+                            current = current,
+                            onChange = { current = it }
+                        )
+                    }
                 }
+
 
                 selectedTask?.let { task ->
                     AlertDialog(
@@ -390,4 +422,42 @@ fun TaskCoreNeonTheme(content: @Composable () -> Unit) {
         ),
         content = content
     )
+}
+
+@Composable
+fun BottomTabs(
+    current: Screen,
+    onChange: (Screen) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        val tasksSelected = current == Screen.Tasks
+        val diarySelected = current == Screen.Diary
+
+        OutlinedButton(
+            onClick = { onChange(Screen.Tasks) },
+            modifier = Modifier.weight(1f),
+            shape = RoundedCornerShape(14.dp),
+            border = BorderStroke(1.dp, if (tasksSelected) Neon.Border else Neon.BorderDim),
+            colors = ButtonDefaults.outlinedButtonColors(
+                containerColor = if (tasksSelected) Neon.Purple.copy(alpha = 0.18f) else Color.Transparent,
+                contentColor = Neon.Text
+            )
+        ) { Text("タスク") }
+
+        OutlinedButton(
+            onClick = { onChange(Screen.Diary) },
+            modifier = Modifier.weight(1f),
+            shape = RoundedCornerShape(14.dp),
+            border = BorderStroke(1.dp, if (diarySelected) Neon.Border else Neon.BorderDim),
+            colors = ButtonDefaults.outlinedButtonColors(
+                containerColor = if (diarySelected) Neon.Purple.copy(alpha = 0.18f) else Color.Transparent,
+                contentColor = Neon.Text
+            )
+        ) { Text("日誌") }
+    }
 }
