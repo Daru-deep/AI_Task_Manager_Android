@@ -12,5 +12,8 @@ data class TaskDto(
     val project: String? = null,
     val created_at: String? = null,
     val completed_at: String? = null,
-    val tags: List<String>? = null
-)
+    val tags: List<String>? = null,
+    val score: Int? = null,
+    val reason: String? = null,
+
+    )

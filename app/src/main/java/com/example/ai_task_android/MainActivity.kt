@@ -46,7 +46,38 @@ class MainActivity : ComponentActivity() {
                 var tasks by remember { 
                     mutableStateOf(TaskJsonlStorage.load(this@MainActivity))
                 }
+
                 var selectedTask by remember { mutableStateOf<UiTask?>(null) }
+                var syncStatus by remember { mutableStateOf("未同期") }
+
+                val fetchFromServer: suspend () -> Unit = {
+                    try {
+                        syncStatus = "同期中..."
+                        val json = TaskSyncClient(BASE_URL).fetchTasksJson()
+                        val resp = Gson().fromJson(json, TasksResponse::class.java)
+
+                        val newTasks = resp.tasks.map { dto ->
+                            UiTask(
+                                id = dto.id.toLong(),
+                                title = dto.text,
+                                status = dto.status,
+                                score = dto.score ?: 0,
+                                reason = dto.reason,
+                                project = dto.project ?: "default",
+                                tags = dto.tags ?: emptyList()
+                            )
+                        }
+
+                        tasks = newTasks
+                        TaskJsonlStorage.save(this@MainActivity, tasks) // キャッシュとして保存
+                        syncStatus = "同期OK (${tasks.size})"
+                    } catch (e: Exception) {
+                        syncStatus = "同期失敗（ローカル）"
+                        Log.e("TaskSync", "サーバー取得失敗: ${e.message}", e)
+                        tasks = TaskJsonlStorage.load(this@MainActivity)
+                    }
+                }
+
 
 
                 // ② サーバーからタスクを取得
@@ -62,15 +93,18 @@ class MainActivity : ComponentActivity() {
                                 id = dto.id.toLong(),
                                 title = dto.text,
                                 status = dto.status,
-                                score = 0,
+                                score = dto.score ?: 0,
+                                reason = dto.reason,
                                 project = dto.project ?: "default",
                                 tags = dto.tags ?: emptyList()
+
                             )
                         }
                     } catch (e: Exception) {
-                        // エラー時はローカルのデータを使う
-                        println("サーバー取得失敗: ${e.message}")
+                        Log.e("TaskSync", "サーバー取得失敗: ${e.message}", e)
+                        tasks = TaskJsonlStorage.load(this@MainActivity)
                     }
+
                 }
                 
                 // ③ スコアラー（Fake）
@@ -152,6 +186,8 @@ class MainActivity : ComponentActivity() {
                 }
 
             }
+
+
         }
     }
 }
@@ -308,12 +344,23 @@ fun TaskRow(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = task.title,
+
                     color = if (isDone) Neon.TextDim else Neon.Text,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.bodyLarge
                 )
+                task.reason?.takeIf { it.isNotBlank() }?.let { r ->
+                    Text(
+                        text = r,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Neon.TextDim,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
 
                 Spacer(Modifier.height(4.dp))
 

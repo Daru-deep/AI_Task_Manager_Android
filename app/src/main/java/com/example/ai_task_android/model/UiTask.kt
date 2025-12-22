@@ -5,6 +5,7 @@ data class UiTask(
     val title: String,
     val status: String,      // "todo" / "done"
     val score: Int,
+    val reason: String? = null,
     val project: String = "default",
     val dueDate: String? = null,          // "2025-12-31" みたいな文字列でOK
     val tags: List<String> = emptyList()
