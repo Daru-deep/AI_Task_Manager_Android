@@ -112,7 +112,12 @@ class MainActivity : ComponentActivity() {
                 
                 // ④ コルーチンスコープ
                 val scope = rememberCoroutineScope()
-                
+
+                // ★ 同期ボタン用（サーバーから再取得）
+                val onSync: () -> Unit = {
+                    scope.launch { fetchFromServer() }
+                }
+
                 // ⑤ スコア更新処理
                 val refreshScores: () -> Unit = {
                     scope.launch {
@@ -149,9 +154,11 @@ class MainActivity : ComponentActivity() {
                                     TaskScreen(
                                         tasks = tasks,
                                         onToggleDone = onToggleDone,
-                                        onRefreshScores = refreshScores,
+                                        onSync = onSync,                 // ★ 追加
+                                        syncStatus = syncStatus,         // ★ 追加（バッジ用）
                                         onTaskClick = { selectedTask = it }
                                     )
+
                                 }
                                 Screen.Diary -> {
                                     DiaryScreen(
@@ -196,7 +203,8 @@ class MainActivity : ComponentActivity() {
 fun TaskScreen(
     tasks: List<UiTask>,
     onToggleDone: (Long) -> Unit,
-    onRefreshScores: () -> Unit,
+    onSync: () -> Unit,
+    syncStatus: String,
     onTaskClick: (UiTask) -> Unit
 ) {
 
@@ -219,19 +227,40 @@ fun TaskScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             // 優先度更新ボタン
-            OutlinedButton(
-                onClick = onRefreshScores,
+            Row(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp),
-                border = BorderStroke(1.dp, Neon.Border),
-                colors = ButtonDefaults.outlinedButtonColors(
-                    containerColor = Color.Transparent,
-                    contentColor = Neon.Text
-                )
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Text("優先度更新", style = MaterialTheme.typography.bodyLarge)
+                OutlinedButton(
+                    onClick = onSync,
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(14.dp),
+                    border = BorderStroke(1.dp, Neon.Border),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        containerColor = Color.Transparent,
+                        contentColor = Neon.Text
+                    )
+                ) {
+                    Text("同期", style = MaterialTheme.typography.bodyLarge)
+                }
+
+                // ★ バッジ（同期状態）
+                Surface(
+                    color = Neon.Purple.copy(alpha = 0.18f),
+                    contentColor = Neon.Text,
+                    shape = RoundedCornerShape(999.dp),
+                    border = BorderStroke(1.dp, Neon.BorderDim)
+                ) {
+                    Text(
+                        text = syncStatus,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        style = MaterialTheme.typography.labelLarge
+                    )
+                }
             }
-            
+
+
             // おすすめタスク
             TaskListCard(
                 modifier = Modifier
